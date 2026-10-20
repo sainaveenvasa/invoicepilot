@@ -1,7 +1,7 @@
 """Data-retention periods (decided 2026-10-19).
 
 These must match the published privacy policy. Legal review is still
-required before general availability; see docs/design/phase-2.1-database-design.md §8.
+required before general availability; see docs/design/phase-2.1-database-design.md §13.
 """
 
 from datetime import timedelta
