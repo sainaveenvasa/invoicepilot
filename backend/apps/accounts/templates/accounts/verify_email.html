@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Verify your email · InvoicePilot{% endblock %}
+{% block content %}
+<h1>Verify your email</h1>
+<form method="post" action="{% url 'accounts:verify_email' token=token %}">
+  {% csrf_token %}
+  <button type="submit">Confirm my email address</button>
+</form>
+{% endblock %}

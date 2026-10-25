@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Sign in · InvoicePilot{% endblock %}
+{% block content %}
+<h1>Sign in</h1>
+<form method="post" novalidate>
+  {% csrf_token %}
+  {{ form.as_div }}
+  <input type="hidden" name="next" value="{{ next }}">
+  <button type="submit">Sign in</button>
+</form>
+<p><a href="{% url 'accounts:password_reset' %}">Forgot your password?</a></p>
+<p>New to InvoicePilot? <a href="{% url 'accounts:signup' %}">Create an account</a>.</p>
+{% endblock %}

@@ -103,7 +103,7 @@ Every table has exactly one owning module. Only that module's `services.py` writ
 ### 3.2 Layout of a module
 
 ```
-invoicepilot/<module>/
+backend/apps/<module>/
   models.py         tables, constraints, small pure methods (derive_status)
   services.py       write use cases; the only place a transaction starts
   selectors.py      tenant-scoped reads, returning querysets or values
@@ -519,7 +519,7 @@ The token is `signing.dumps({"o": org_id, "e": email}, salt="unsubscribe.v1")`. 
 
 ### 12.2 Configuration
 
-12-factor: all configuration comes from environment variables, and secrets come from the platform's secret store. `config/settings.py` fails at start-up if a required secret is missing when `DEBUG` is off. That already happens for `DJANGO_SECRET_KEY`.
+12-factor: all configuration comes from environment variables, and secrets come from the platform's secret store. `config.settings.production` fails at start-up if a required value is missing (`DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS`, `SITE_URL`). `local` and `test` settings provide development defaults. `.env.example` documents every variable.
 
 Production settings: `DEBUG=False`, `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS=31536000` (plus `INCLUDE_SUBDOMAINS` and `PRELOAD` once stable), `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, `SESSION_COOKIE_SAMESITE="Lax"`, `CSRF_TRUSTED_ORIGINS`, `ALLOWED_HOSTS`, `SECURE_PROXY_SSL_HEADER` (only behind a proxy that sets it), and `PASSWORD_HASHERS` with Argon2 first.
 

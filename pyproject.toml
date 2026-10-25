@@ -2,18 +2,58 @@
 name = "invoicepilot"
 version = "0.1.0"
 description = "Automated invoice tracking and payment follow-up for freelancers and consultants."
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "django>=5.2,<5.3",
+    "django>=5.2,<5.3",  # 5.2 LTS
+    "djangorestframework>=3.16",
     "psycopg[binary]>=3.2",
+    "argon2-cffi>=23.1",
+    "gunicorn>=23",
+    "whitenoise>=6.7",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8",
     "pytest-django>=4.9",
+    "ruff>=0.17",
+    "pre-commit>=4",
 ]
 
+[tool.uv]
+package = false
+
 [tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "config.settings"
-testpaths = ["tests"]
+# --ds wins over a DJANGO_SETTINGS_MODULE exported from .env, so tests never
+# run against local or production settings by accident.
+django_find_project = false
+pythonpath = ["backend"]
+testpaths = ["backend/tests"]
+addopts = ["--ds=config.settings.test", "--strict-markers", "--strict-config", "-ra"]
+filterwarnings = ["error::RuntimeWarning"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["backend"]
+extend-exclude = ["backend/apps/*/migrations", "*.md"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle
+    "F",       # pyflakes
+    "I",       # isort
+    "B",       # bugbear
+    "UP",      # pyupgrade
+    "S",       # bandit (threat model §9)
+    "DJ",      # django
+    "C4",      # comprehensions
+    "SIM",     # simplify
+]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/tests/**" = ["S101", "S105", "S106"]  # asserts and fake passwords
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "config"]

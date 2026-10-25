@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Create your account · InvoicePilot{% endblock %}
+{% block content %}
+<h1>Create your account</h1>
+<form method="post" novalidate>
+  {% csrf_token %}
+  {{ form.as_div }}
+  <button type="submit">Create account</button>
+</form>
+<p>Already have an account? <a href="{% url 'accounts:login' %}">Sign in</a>.</p>
+{% endblock %}

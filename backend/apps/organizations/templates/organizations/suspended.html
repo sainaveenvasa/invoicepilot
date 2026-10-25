@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Workspace suspended · InvoicePilot{% endblock %}
+{% block content %}
+<h1>This workspace is suspended</h1>
+<p>Contact support if you think this is a mistake. <a href="{% url 'app:workspace_list' %}">Switch workspace</a>.</p>
+{% endblock %}

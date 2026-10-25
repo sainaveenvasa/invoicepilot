@@ -8,10 +8,10 @@ This document is the contract for the schema. Wherever it matches the code, the 
 
 | | |
 |---|---|
-| Models | `invoicepilot/<app>/models.py` |
-| Migrations | `invoicepilot/<app>/migrations/` (includes the hand-written `0002_*` migrations) |
-| Schema tests | `tests/` (58 tests for v1.0, run against PostgreSQL) |
-| Retention job | `invoicepilot/retention/` (`manage.py purge_expired_data`) |
+| Models | `backend/apps/<app>/models.py` |
+| Migrations | `backend/apps/<app>/migrations/` (includes the hand-written `0002_*` migrations) |
+| Schema tests | `backend/tests/` (58 schema tests for v1.0, run against PostgreSQL) |
+| Retention job | `backend/apps/retention/` (`manage.py purge_expired_data`) |
 
 ---
 
@@ -695,7 +695,7 @@ A trigger rejects UPDATE and DELETE unless the retention job has run `SET LOCAL 
 
 Only signature-verified events are stored. Index: partial `(received_at) WHERE status IN ('received','failed')` for reprocessing.
 
-### 6.10 outbox **[v2: new app `invoicepilot.outbox`]**
+### 6.10 outbox **[v2: new app `apps.outbox`]**
 
 #### `outbox_outboxevent`
 
@@ -1021,7 +1021,7 @@ The tenant keys `UNIQUE (organization_id, id)` add one index per parent table. T
 
 ### Retention periods (decided 2026-10-19)
 
-The periods live in `invoicepilot/retention/policy.py`. `manage.py purge_expired_data` applies them. It is idempotent, runs daily (Celery beat in Phase 2.5), and writes a `retention.purged` audit event with its counts.
+The periods live in `backend/apps/retention/policy.py`. `manage.py purge_expired_data` applies them. It is idempotent, runs daily (Celery beat in Phase 2.5), and writes a `retention.purged` audit event with its counts.
 
 | Data | Kept for | Reason |
 |---|---|---|
@@ -1118,10 +1118,10 @@ Handed to later phases: RLS and separate database roles, including revoking UPDA
 
 ## 17. Run it locally
 
+See the [README](../../README.md#getting-started) for setup (Docker Compose or a local PostgreSQL 17). The schema-specific commands:
+
 ```bash
-uv sync          # installs runtime + dev dependencies from uv.lock
-export DJANGO_DEBUG=1 POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DB=invoicepilot POSTGRES_USER=invoicepilot
-uv run python manage.py migrate
-uv run pytest    # 58 v1.0 schema tests; needs PostgreSQL (SQLite is not supported)
-uv run python manage.py purge_expired_data   # apply the retention policy (daily in production)
+make migrate     # apply migrations
+make test        # full suite, including the 58 v1.0 schema tests; needs PostgreSQL (SQLite is not supported)
+uv run python backend/manage.py purge_expired_data   # apply the retention policy (daily in production)
 ```

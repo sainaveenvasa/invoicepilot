@@ -1,0 +1,36 @@
+# Install once with `make install` (or `uv run pre-commit install`).
+# Run on everything with `uv run pre-commit run --all-files`.
+# CI runs the same Ruff version from uv.lock; keep `rev` below in step with it.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.2
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # Blocks commits containing credentials (threat model T10).
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: missing-migrations
+        name: django makemigrations --check
+        entry: env DJANGO_SETTINGS_MODULE=config.settings.test uv run python backend/manage.py makemigrations --check --dry-run
+        language: system
+        pass_filenames: false
+        files: ^backend/apps/.*/models(\.py|/)

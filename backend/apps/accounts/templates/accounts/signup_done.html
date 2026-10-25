@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Check your inbox · InvoicePilot{% endblock %}
+{% block content %}
+<h1>Check your inbox</h1>
+<p>We sent an email to the address you entered. Follow the link in it to verify your address, then sign in.</p>
+<p><a href="{% url 'accounts:login' %}">Go to sign in</a></p>
+{% endblock %}

@@ -1,0 +1,9 @@
+{% autoescape off %}Hi,
+
+Someone tried to create a new InvoicePilot account with this email address, but you already have one. No new account was created.
+
+Sign in: {{ login_url }}
+Forgot your password? {{ reset_url }}
+
+If this wasn't you, you can ignore this email.
+{% endautoescape %}

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Email verification · InvoicePilot{% endblock %}
+{% block content %}
+{% if verified %}
+  <h1>Email verified</h1>
+  <p>Thanks, your email address is confirmed.</p>
+  <p><a href="{% url 'app:dashboard' %}">Continue</a></p>
+{% else %}
+  <h1>This link is invalid or has expired</h1>
+  <p>Sign in and request a new verification email.</p>
+{% endif %}
+{% endblock %}

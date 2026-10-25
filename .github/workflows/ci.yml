@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Ruff
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.5"
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check --output-format=github .
+      - name: Format
+        run: uv run ruff format --check .
+
+  test:
+    name: Checks, migrations and tests (PostgreSQL 17)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: invoicepilot
+          POSTGRES_USER: invoicepilot
+          # A throwaway database inside the job, reachable only from it, so
+          # no password is needed or stored.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U invoicepilot -d invoicepilot"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.test
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: invoicepilot
+      POSTGRES_USER: invoicepilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.5"
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --locked
+
+      - name: Django system checks
+        run: uv run python backend/manage.py check --fail-level WARNING
+
+      - name: Fail on missing migrations
+        run: uv run python backend/manage.py makemigrations --check --dry-run
+
+      - name: Apply migrations to an empty database
+        run: |
+          uv run python backend/manage.py migrate --noinput
+          uv run python backend/manage.py createcachetable
+
+      - name: Production deploy checks
+        # Placeholder values generated per run; production reads real ones from its secret store.
+        run: |
+          export DJANGO_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(50))')"
+          uv run python backend/manage.py check --deploy --fail-level WARNING
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.production
+          DJANGO_ALLOWED_HOSTS: app.invoicepilot.example
+          DJANGO_CSRF_TRUSTED_ORIGINS: https://app.invoicepilot.example
+          SITE_URL: https://app.invoicepilot.example
+
+      - name: Tests
+        run: uv run pytest
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.0/gitleaks_8.30.0_linux_x64.tar.gz \
+            | tar -xz gitleaks
+          ./gitleaks git --redact --verbose --exit-code 1 .

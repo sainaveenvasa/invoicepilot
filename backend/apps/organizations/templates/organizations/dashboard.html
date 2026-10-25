@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ workspace.name }} · InvoicePilot{% endblock %}
+{% block content %}
+<h1>{{ workspace.name }}</h1>
+{% if not user.is_email_verified %}
+  <section>
+    <p>Please verify your email address. Reminders can't be switched on until it's confirmed.</p>
+    <form method="post" action="{% url 'accounts:resend_verification' %}">
+      {% csrf_token %}
+      <button type="submit">Resend verification email</button>
+    </form>
+  </section>
+{% endif %}
+{% if workspace.read_only_since %}
+  <p>This workspace is read-only until a subscription is active.</p>
+{% endif %}
+<dl>
+  <dt>Timezone</dt><dd>{{ workspace.timezone }}</dd>
+  <dt>Default currency</dt><dd>{{ workspace.default_currency }}</dd>
+</dl>
+{% endblock %}

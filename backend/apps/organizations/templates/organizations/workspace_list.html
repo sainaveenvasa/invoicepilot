@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Your workspaces · InvoicePilot{% endblock %}
+{% block content %}
+<h1>Your workspaces</h1>
+<ul>
+  {% for membership in memberships %}
+    <li>
+      <form method="post" action="{% url 'app:workspace_select' organization_id=membership.organization_id %}">
+        {% csrf_token %}
+        <button type="submit">{{ membership.organization.name }}</button>
+        ({{ membership.get_role_display }})
+      </form>
+    </li>
+  {% endfor %}
+</ul>
+<p><a href="{% url 'app:workspace_create' %}">Create a workspace</a></p>
+{% endblock %}

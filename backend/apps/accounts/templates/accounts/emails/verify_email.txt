@@ -1,0 +1,8 @@
+{% autoescape off %}Hi{% if user.full_name %} {{ user.full_name }}{% endif %},
+
+Confirm your email address for InvoicePilot by opening this link:
+
+{{ verify_url }}
+
+The link expires in 48 hours. If you didn't create an InvoicePilot account, you can ignore this email.
+{% endautoescape %}
