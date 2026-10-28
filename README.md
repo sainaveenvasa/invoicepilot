@@ -4,7 +4,7 @@ Automated invoice tracking and payment follow-up for freelancers and consultants
 
 **Stack:** Python 3.13 · Django 5.2 LTS · Django REST Framework · PostgreSQL 17 · pytest · Ruff · Docker / Docker Compose · uv
 
-**Status:** foundation phase. Accounts (sign-up, login, email verification, password reset) and workspaces (organizations, owner membership, tenant resolution) are implemented. The schema for customers, invoices, reminders, billing, imports, audit and webhooks exists from the data-model phase ([database design](docs/design/phase-2.1-database-design.md)), but none of those features have views, services or APIs yet.
+**Status:** foundation phase. Accounts (sign-up, login, email verification, password reset), workspaces (organizations, owner membership, tenant resolution) and customer management are implemented. The schema for invoices, reminders, billing, imports, audit and webhooks exists from the data-model phase ([database design](docs/design/phase-2.1-database-design.md)), but none of those features have views, services or APIs yet.
 
 ## Design documents
 
@@ -28,7 +28,9 @@ backend/
     core/            base models, UUIDv7, RequestContext, domain errors, problem-JSON, throttling, health
     accounts/        custom User (UUID PK, normalized unique email), auth flows
     organizations/   Organization, Membership, permissions, selectors, services, TenantMiddleware, API
-    customers/ invoices/ reminders/ billing/ imports/ audit/ webhooks/ retention/   schema only, for now
+    customers/       Customer, selectors, services, forms, HTMX views, API
+    invoices/ reminders/ billing/ imports/ audit/ webhooks/ retention/   schema only, for now
+  static/vendor/     HTMX, vendored at a pinned version (checksum-tested)
   templates/         base.html
   tests/             pytest suite (PostgreSQL)
 docs/                design documents
@@ -113,6 +115,16 @@ Sign-up, login, verification and reset are HTML form flows, as [API contracts §
 - `permissions.require(ctx, action)` checks the role-to-action map. Suspended workspaces get 403, and read-only workspaces (no active subscription) refuse writes.
 - HTML: `/app/` (dashboard), `/app/workspaces/` (picker), `/app/workspaces/new/`.
 - API: `GET /api/v1/me`, `GET`/`PATCH /api/v1/workspace`. Errors are RFC 9457 problem documents, and unknown or read-only body fields are rejected.
+
+### Customers
+
+- **Model:** name, email, company, notes, active state and a `version` column for optimistic locking. Database `CHECK`s back every rule: email lowercase and unique per workspace, non-blank name and email, notes at most 5,000 characters, `deactivated_at` set exactly when inactive, `version >= 1`.
+- **Services** (`customers.services`) are the only writers. Each checks `customers.manage` and write access itself, so the HTML app, the API and future imports get the same rules. Creating a customer checks the plan's `max_customers` under a per-workspace advisory lock (`billing.limits.check_plan_limit`). Deactivated customers count toward the limit.
+- **Edits** compare `version`: a stale save is refused with the current record instead of overwriting someone else's change. Deactivate and reactivate are idempotent. Delete works only for customers with no invoices; otherwise it's `409 in_use`, and you deactivate instead.
+- **Tenant isolation:** every read starts from `Customer.objects.for_organization(ctx.organization)`. Another workspace's customer ID is a 404 on every HTML and API route, and the tests walk each route and method to prove it.
+- **HTML** (`/app/customers/`): list with search and status filter (HTMX refreshes only the results, and it works as a plain form without JavaScript), page-number pagination, add, edit (hidden `version`), deactivate/reactivate (HTMX swaps the row), and delete with confirmation.
+- **API** ([API contracts §4](docs/api/api-contracts.md#4-customers)): `GET`/`POST /api/v1/customers` (cursor pagination, `q`, `is_active`, `ordering`), `GET`/`PATCH`/`DELETE /api/v1/customers/{id}`, `POST …/deactivate`, `POST …/reactivate`. `PATCH` requires `If-Match: "<version>"` (`428` without it, `412 version_conflict` with `current` when it's stale). Responses carry an `ETag`.
+- **HTMX 2.0.11** is vendored in `backend/static/vendor/` and configured with a `<meta>` tag (no inline script): same-origin requests only, no eval, no history cache. Every HTMX request sends the CSRF token through `hx-headers`.
 
 ### Health
 

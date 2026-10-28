@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ customer.name }} · InvoicePilot{% endblock %}
+{% block content %}
+<p><a href="{% url 'customers:list' %}">All customers</a></p>
+<h1>{{ customer.name }}</h1>
+{% include "customers/_read_only_notice.html" %}
+{% if not customer.is_active %}
+  <p>Deactivated on {{ customer.deactivated_at|date:"DATE_FORMAT" }}. Reminders for this customer are skipped.</p>
+{% endif %}
+<dl>
+  <dt>Email</dt><dd>{{ customer.email }}</dd>
+  <dt>Company</dt><dd>{{ customer.company_name|default:"—" }}</dd>
+  <dt>Notes</dt><dd>{{ customer.notes|default:"—"|linebreaksbr }}</dd>
+</dl>
+{% if not workspace.read_only_since %}
+  <p><a href="{% url 'customers:edit' customer_id=customer.pk %}">Edit</a></p>
+  {% if customer.is_active %}
+    <form method="post" action="{% url 'customers:deactivate' customer_id=customer.pk %}">
+      {% csrf_token %}
+      <button type="submit">Deactivate</button>
+    </form>
+  {% else %}
+    <form method="post" action="{% url 'customers:reactivate' customer_id=customer.pk %}">
+      {% csrf_token %}
+      <button type="submit">Reactivate</button>
+    </form>
+  {% endif %}
+  <p><a href="{% url 'customers:delete' customer_id=customer.pk %}">Delete</a></p>
+{% endif %}
+{% endblock %}

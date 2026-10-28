@@ -1,0 +1,29 @@
+{% if page.object_list %}
+  <table>
+    <thead>
+      <tr><th scope="col">Name</th><th scope="col">Email</th><th scope="col">Company</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr>
+    </thead>
+    <tbody>
+      {% for customer in page.object_list %}
+        {% include "customers/_customer_row.html" %}
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if page.has_other_pages %}
+    <nav aria-label="Pagination">
+      {% if page.has_previous %}
+        <a href="{% querystring page=page.previous_page_number %}" hx-get="{% querystring page=page.previous_page_number %}"
+           hx-target="#customer-results" hx-push-url="true">Previous</a>
+      {% endif %}
+      <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+      {% if page.has_next %}
+        <a href="{% querystring page=page.next_page_number %}" hx-get="{% querystring page=page.next_page_number %}"
+           hx-target="#customer-results" hx-push-url="true">Next</a>
+      {% endif %}
+    </nav>
+  {% endif %}
+{% elif q %}
+  <p>No customers match “{{ q }}”.</p>
+{% else %}
+  <p>No customers yet.</p>
+{% endif %}

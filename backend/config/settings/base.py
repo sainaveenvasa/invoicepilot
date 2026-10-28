@@ -175,6 +175,7 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],  # no browsable API
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
+    "DEFAULT_PAGINATION_CLASS": "apps.core.api.pagination.CursorPagination",
     "EXCEPTION_HANDLER": "apps.core.api.errors.problem_exception_handler",
 }
 
@@ -188,6 +189,8 @@ USE_TZ = True
 # --- Static files ---------------------------------------------------------
 
 STATIC_URL = "static/"
+# Vendored front-end assets (HTMX), served by WhiteNoise; never from a CDN.
+STATICFILES_DIRS = [BASE_DIR / "static"]
 
 # --- Logging --------------------------------------------------------------
 

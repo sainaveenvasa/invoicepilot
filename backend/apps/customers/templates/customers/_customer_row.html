@@ -1,0 +1,19 @@
+<tr id="customer-{{ customer.pk }}">
+  <td><a href="{% url 'customers:detail' customer_id=customer.pk %}">{{ customer.name }}</a></td>
+  <td>{{ customer.email }}</td>
+  <td>{{ customer.company_name }}</td>
+  <td>{% if customer.is_active %}Active{% else %}Deactivated{% endif %}</td>
+  <td>
+    {% if not workspace.read_only_since %}
+      {% if customer.is_active %}
+        {% url 'customers:deactivate' customer_id=customer.pk as action %}
+      {% else %}
+        {% url 'customers:reactivate' customer_id=customer.pk as action %}
+      {% endif %}
+      <form method="post" action="{{ action }}" hx-post="{{ action }}" hx-target="closest tr" hx-swap="outerHTML">
+        {% csrf_token %}
+        <button type="submit">{% if customer.is_active %}Deactivate{% else %}Reactivate{% endif %}</button>
+      </form>
+    {% endif %}
+  </td>
+</tr>

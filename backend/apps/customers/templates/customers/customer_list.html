@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Customers · InvoicePilot{% endblock %}
+{% block content %}
+<h1>Customers</h1>
+{% include "customers/_read_only_notice.html" %}
+{% if not workspace.read_only_since %}<p><a href="{% url 'customers:create' %}">Add customer</a></p>{% endif %}
+
+{# Works as a plain GET form without JavaScript; HTMX refreshes only the results as you type. #}
+<form method="get" action="{% url 'customers:list' %}" role="search">
+  <label for="customer-search">Search by name or email</label>
+  <input type="search" id="customer-search" name="q" value="{{ q }}" maxlength="200" autocomplete="off"
+         hx-get="{% url 'customers:list' %}" hx-trigger="input changed delay:300ms, search"
+         hx-target="#customer-results" hx-include="closest form" hx-push-url="true">
+  <label for="customer-status">Show</label>
+  <select id="customer-status" name="status"
+          hx-get="{% url 'customers:list' %}" hx-trigger="change"
+          hx-target="#customer-results" hx-include="closest form" hx-push-url="true">
+    {% for value, label in status_choices %}
+      <option value="{{ value }}"{% if value == status %} selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">Search</button>
+</form>
+
+<div id="customer-results">
+  {% include "customers/_customer_results.html" %}
+</div>
+{% endblock %}

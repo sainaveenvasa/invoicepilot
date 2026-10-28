@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Delete {{ customer.name }} · InvoicePilot{% endblock %}
+{% block content %}
+<h1>Delete {{ customer.name }}?</h1>
+{% if error %}
+  <p class="error">{{ error }}</p>
+  <p><a href="{% url 'customers:detail' customer_id=customer.pk %}">Back to {{ customer.name }}</a></p>
+{% else %}
+  <p>This can't be undone. Customers with invoices can't be deleted; deactivate them instead.</p>
+  <form method="post">
+    {% csrf_token %}
+    <button type="submit">Delete customer</button>
+    <a href="{% url 'customers:detail' customer_id=customer.pk %}">Cancel</a>
+  </form>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{% if customer %}Edit {{ customer.name }}{% else %}Add a customer{% endif %} · InvoicePilot{% endblock %}
+{% block content %}
+<h1>{% if customer %}Edit {{ customer.name }}{% else %}Add a customer{% endif %}</h1>
+{% include "customers/_read_only_notice.html" %}
+{% if conflict %}
+  <p><a href="{% url 'customers:edit' customer_id=customer.pk %}">Reload the latest version</a> and make your changes again.</p>
+{% endif %}
+<form method="post" novalidate>
+  {% csrf_token %}
+  {{ form.as_div }}
+  <button type="submit">{% if customer %}Save{% else %}Add customer{% endif %}</button>
+  <a href="{% if customer %}{% url 'customers:detail' customer_id=customer.pk %}{% else %}{% url 'customers:list' %}{% endif %}">Cancel</a>
+</form>
+{% endblock %}

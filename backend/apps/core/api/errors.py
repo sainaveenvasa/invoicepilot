@@ -17,9 +17,14 @@ TITLES = {
     "permission_denied": "Permission denied.",
     "workspace_read_only": "The workspace is read-only.",
     "workspace_suspended": "The workspace is suspended.",
+    "plan_limit_reached": "Plan limit reached.",
     "not_found": "Not found.",
     "method_not_allowed": "Method not allowed.",
+    "duplicate": "Already exists.",
+    "in_use": "In use.",
+    "version_conflict": "Version conflict.",
     "unsupported_media_type": "Unsupported media type.",
+    "precondition_required": "Precondition required.",
     "rate_limited": "Too many requests.",
 }
 
@@ -55,7 +60,8 @@ def problem_response(status_code: int, code: str, detail: str) -> JsonResponse:
 
 def problem_exception_handler(exc, context):
     if isinstance(exc, DomainError):
-        return Response(problem(exc.status, exc.code, exc.detail), status=exc.status, content_type=PROBLEM_CONTENT_TYPE)
+        body = problem(exc.status, exc.code, exc.detail, **exc.extra)
+        return Response(body, status=exc.status, content_type=PROBLEM_CONTENT_TYPE)
     if isinstance(exc, DjangoValidationError):
         exc = exceptions.ValidationError(exc.message_dict if hasattr(exc, "error_dict") else exc.messages)
 

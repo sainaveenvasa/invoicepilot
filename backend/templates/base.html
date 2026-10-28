@@ -1,15 +1,19 @@
-<!doctype html>
+{% load static %}<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}InvoicePilot{% endblock %}</title>
+  {# System design §5.2 and threat model T3: no eval, no script tags in swaps, same-origin only, no history cache. 409 and 422 swap so form errors render in place. #}
+  <meta name="htmx-config" content='{"selfRequestsOnly": true, "allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false, "historyCacheSize": 0, "responseHandling": [{"code": "204", "swap": false}, {"code": "[23]..", "swap": true}, {"code": "409", "swap": true}, {"code": "422", "swap": true}, {"code": "[45]..", "swap": false, "error": true}]}'>
+  <script src="{% static 'vendor/htmx-2.0.11.min.js' %}" defer></script>
 </head>
-<body>
+<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
   <header>
     <nav>
       <a href="{% url 'app:dashboard' %}">InvoicePilot</a>
       {% if user.is_authenticated %}
+        <a href="{% url 'customers:list' %}">Customers</a>
         <a href="{% url 'app:workspace_list' %}">Workspaces</a>
         <form method="post" action="{% url 'accounts:logout' %}">
           {% csrf_token %}

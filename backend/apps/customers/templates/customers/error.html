@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Can't do that · InvoicePilot{% endblock %}
+{% block content %}
+<h1>That didn't work</h1>
+<p>{{ message }}</p>
+<p><a href="{% url 'customers:list' %}">Back to customers</a></p>
+{% endblock %}
