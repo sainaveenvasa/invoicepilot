@@ -19,25 +19,50 @@ PRODUCTION_ENV = {
     "DJANGO_ALLOWED_HOSTS": "app.invoicepilot.example",
     "DJANGO_CSRF_TRUSTED_ORIGINS": "https://app.invoicepilot.example",
     "SITE_URL": "https://app.invoicepilot.example",
+    "REDIS_URL": "rediss://:test-password@redis.invoicepilot.example:6379/0",
 }
 
 
 def run_with_production_settings(args, **env):
     """Run a fresh interpreter, so the production module is imported with exactly this environment."""
-    clean = {k: v for k, v in os.environ.items() if not k.startswith("DJANGO_") and k != "SITE_URL"}
+    clean = {k: v for k, v in os.environ.items() if not k.startswith("DJANGO_") and k not in ("SITE_URL", "REDIS_URL")}
     clean.update(DJANGO_SETTINGS_MODULE="config.settings.production", **env)
     return subprocess.run(  # noqa: S603 - fixed argv, our own interpreter
         [sys.executable, *args], cwd=BACKEND_DIR, env=clean, capture_output=True, text=True, timeout=60
     )
 
 
-@pytest.mark.parametrize("missing", ["DJANGO_SECRET_KEY", "DJANGO_ALLOWED_HOSTS", "SITE_URL"])
+@pytest.mark.parametrize("missing", ["DJANGO_SECRET_KEY", "DJANGO_ALLOWED_HOSTS", "SITE_URL", "REDIS_URL"])
 def test_production_settings_refuse_to_start_without_required_values(missing):
     env = {**PRODUCTION_ENV, "DJANGO_SECRET_KEY": secrets.token_urlsafe(50)}
     del env[missing]
     result = run_with_production_settings(["-c", "import django; django.setup()"], **env)
     assert result.returncode != 0
     assert f"The {missing} environment variable is required." in result.stderr
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["redis://:test-password@redis.invoicepilot.example:6379/0", "rediss://redis.invoicepilot.example:6379/0"],
+    ids=["no-tls", "no-password"],
+)
+def test_production_settings_refuse_an_unprotected_broker(url):
+    env = {**PRODUCTION_ENV, "DJANGO_SECRET_KEY": secrets.token_urlsafe(50), "REDIS_URL": url}
+    result = run_with_production_settings(["-c", "import django; django.setup()"], **env)
+    assert result.returncode != 0
+    assert "REDIS_URL must use rediss:// with a password." in result.stderr
+    assert "test-password" not in result.stderr
+
+
+def test_production_broker_verifies_the_tls_certificate():
+    code = (
+        "import django, ssl; django.setup()\n"
+        "from config import celery_app\n"
+        "assert celery_app.conf.broker_use_ssl == {'ssl_cert_reqs': ssl.CERT_REQUIRED}"
+    )
+    env = {**PRODUCTION_ENV, "DJANGO_SECRET_KEY": secrets.token_urlsafe(50)}
+    result = run_with_production_settings(["-c", code], **env)
+    assert result.returncode == 0, result.stderr
 
 
 def test_production_settings_pass_deploy_checks():

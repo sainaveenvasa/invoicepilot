@@ -3,6 +3,7 @@
 # One image, two targets:
 #   dev         Docker Compose: dev dependencies, runserver, source bind-mounted
 #   production  Gunicorn, static files collected, no dev tooling (the default)
+# Workers and beat run the same image with a different command (see compose.yaml).
 ARG PYTHON_VERSION=3.13
 
 FROM python:${PYTHON_VERSION}-slim AS base
@@ -39,6 +40,7 @@ RUN DJANGO_SECRET_KEY=collectstatic-placeholder \
     DJANGO_ALLOWED_HOSTS=localhost \
     DJANGO_CSRF_TRUSTED_ORIGINS=http://localhost \
     SITE_URL=http://localhost \
+    REDIS_URL=rediss://:placeholder@localhost \
     python manage.py collectstatic --noinput --settings=config.settings.production
 USER app
 ENV DJANGO_SETTINGS_MODULE=config.settings.production

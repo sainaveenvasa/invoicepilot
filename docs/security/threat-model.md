@@ -359,8 +359,8 @@ flowchart LR
 
 | Control | Status |
 |---|---|
-| Celery accepts **JSON only** (no pickle, so injected messages can't execute code) | Required |
-| Redis on the private network, with a password and TLS. No public endpoint. | Required |
+| Celery accepts **JSON only** (no pickle, so injected messages can't execute code) | Exists |
+| Redis on the private network, with a password and TLS. No public endpoint. | Required (production settings refuse a URL without `rediss://` and a password; the network is infrastructure) |
 | **Tasks take IDs only and revalidate everything** against PostgreSQL: `send_delivery` checks the state, `scheduled_for <= now()`, eligibility and caps, so an injected task can do no more than a legitimate due job would. `commit_batch` relies on its compare-and-set. | Required |
 | The application database role has no DDL, and **no UPDATE or DELETE on the ledger and audit tables**, so history can't be rewritten even with stolen credentials | Required (phase 2.4); triggers exist for audit, required for ledger |
 | Split credentials: web holds the Stripe write key and no email key; the worker holds the email key and a read-only Stripe key | Required |

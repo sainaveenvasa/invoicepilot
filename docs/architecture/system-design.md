@@ -350,6 +350,10 @@ CELERY_TASK_SOFT_TIME_LIMIT = 240
 
 - **No long `countdown` or `eta`.** With Redis, a delayed message is redelivered after `visibility_timeout`, which duplicates it. Anything scheduled for later is a database row (`scheduled_for`, `available_at`) that beat picks up when it is due.
 - **Every task is idempotent**, because `acks_late` means it can run twice.
+- **Retries:** the base task retries `ConnectionError`, `TimeoutError` and `OperationalError` up to 5 times, with jittered exponential backoff capped at 600 s, well under `visibility_timeout`. Other exceptions are bugs and fail once.
+- **Queues are declared** (`CELERY_TASK_CREATE_MISSING_QUEUES = False`), so a mistyped queue is an error, not a queue no worker reads.
+- **Workers and beat log through `settings.LOGGING`.** Lines logged during a task carry its name and ID, never its arguments.
+- **macOS:** pools spawn processes there, unlike Linux, so `config/celery.py` sets `FORKED_BY_MULTIPROCESSING`. Without it every task fails on a developer's Mac, even though the worker looks healthy.
 
 ### 8.2 Queues
 
@@ -359,11 +363,11 @@ CELERY_TASK_SOFT_TIME_LIMIT = 240
 | `email` | `reminders.send_delivery`, account emails | Rate-limited per worker to protect the provider quota |
 | `default` | Webhook processing, planning | |
 | `imports` | `imports.validate_batch`, `imports.commit_batch` | CPU-heavy. Time limit 600 s. |
-| `maintenance` | Reconciliation, retention, gauges | |
+| `maintenance` | Reconciliation, retention, gauges, the `core.ping` test task | |
 
 ### 8.3 Beat schedule
 
-All of these are idempotent sweepers. Each run also checks in with a Sentry cron monitor, so a dead `beat` raises an alert (§11).
+All of these are idempotent sweepers. Each run also checks in with a Sentry cron monitor, so a dead `beat` raises an alert (§11). Each joins `CELERY_BEAT_SCHEDULE` when its task is built; until then, beat only sends `core.ping` every minute.
 
 | Every | Task | Purpose |
 |---|---|---|

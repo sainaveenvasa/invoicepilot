@@ -1,6 +1,28 @@
 # Local development only. `cp .env.example .env`, then `make up`.
 name: invoicepilot
 
+# web, worker and beat are the same image with a different command.
+x-app: &app
+  image: invoicepilot-dev
+  build:
+    context: .
+    target: dev
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    DJANGO_SETTINGS_MODULE: config.settings.local
+    POSTGRES_HOST: db
+    POSTGRES_PORT: "5432"
+    REDIS_URL: redis://redis:6379/0
+    # These win over .env, so nothing here can send mail outside Mailpit.
+    EMAIL_BACKEND: django.core.mail.backends.smtp.EmailBackend
+    EMAIL_HOST: mailpit
+    EMAIL_PORT: "1025"
+    EMAIL_USE_TLS: "0"
+  volumes:
+    - ./backend:/app/backend
+
 services:
   db:
     image: postgres:17
@@ -18,6 +40,19 @@ services:
       timeout: 3s
       retries: 10
 
+  # The Celery broker. No persistence: PostgreSQL is the source of truth, and
+  # nothing here has to survive a restart (system design §1).
+  redis:
+    image: redis:7
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   # Catches every email the app sends; open http://localhost:8025 to read them.
   mailpit:
     image: axllent/mailpit:v1
@@ -25,29 +60,17 @@ services:
       - "127.0.0.1:8025:8025"
 
   web:
-    build:
-      context: .
-      target: dev
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      DJANGO_SETTINGS_MODULE: config.settings.local
-      POSTGRES_HOST: db
-      POSTGRES_PORT: "5432"
-      EMAIL_BACKEND: django.core.mail.backends.smtp.EmailBackend
-      EMAIL_HOST: mailpit
-      EMAIL_PORT: "1025"
+    <<: *app
     command: >
       sh -c "python manage.py migrate --noinput
       && python manage.py createcachetable
       && python manage.py runserver 0.0.0.0:8000"
     ports:
       - "127.0.0.1:8000:8000"
-    volumes:
-      - ./backend:/app/backend
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       mailpit:
         condition: service_started
@@ -56,6 +79,32 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+
+  # Waits for web, which applies the migrations.
+  worker:
+    <<: *app
+    command: celery -A config worker --concurrency 4
+    depends_on:
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config inspect ping --destination celery@$$HOSTNAME --timeout 5"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 20s
+
+  # Exactly one: a second beat would double every schedule (system design §2).
+  beat:
+    <<: *app
+    command: celery -A config beat
+    depends_on:
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_healthy
 
 volumes:
   pgdata:

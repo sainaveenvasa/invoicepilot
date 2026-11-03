@@ -2,9 +2,9 @@
 
 Automated invoice tracking and payment follow-up for freelancers and consultants.
 
-**Stack:** Python 3.13 · Django 5.2 LTS · Django REST Framework · PostgreSQL 17 · pytest · Ruff · Docker / Docker Compose · uv
+**Stack:** Python 3.13 · Django 5.2 LTS · Django REST Framework · PostgreSQL 17 · Celery · Redis 7 · pytest · Ruff · Docker / Docker Compose · uv
 
-**Status:** foundation phase. Accounts (sign-up, login, email verification, password reset), workspaces (organizations, owner membership, tenant resolution), customer management and invoice management (API) are implemented. The schema for payments, reminders, billing, imports, audit and webhooks exists from the data-model phase ([database design](docs/design/phase-2.1-database-design.md)), but none of those features have views, services or APIs yet.
+**Status:** foundation phase. Accounts (sign-up, login, email verification, password reset), workspaces (organizations, owner membership, tenant resolution), customer management and invoice management (API) are implemented, and Celery is configured with a worker and beat, running only a safe test task so far. The schema for payments, reminders, billing, imports, audit and webhooks exists from the data-model phase ([database design](docs/design/phase-2.1-database-design.md)), but none of those features have views, services or APIs yet.
 
 ## Design documents
 
@@ -23,6 +23,8 @@ backend/
   config/
     settings/        base.py, local.py, test.py, production.py
     env.py           typed environment-variable readers
+    celery.py        Celery app and base task (retries)
+    logging.py       adds the running task to log lines
     urls.py  wsgi.py  asgi.py
   apps/
     core/            base models, UUIDv7, RequestContext, domain errors, problem-JSON, throttling, health
@@ -36,7 +38,7 @@ backend/
   tests/             pytest suite (PostgreSQL)
 docs/                design documents
 Dockerfile           dev and production targets
-compose.yaml         local stack: PostgreSQL 17, Mailpit, web
+compose.yaml         local stack: PostgreSQL 17, Redis, Mailpit, web, worker, beat
 Makefile             developer commands (run `make`)
 ```
 
@@ -48,11 +50,12 @@ Requires Docker with Compose v2.24 or newer.
 
 ```bash
 make env        # creates .env from .env.example
-make up         # builds and starts db, mailpit and web
+make up         # builds and starts db, redis, mailpit, web, worker and beat
 ```
 
 - App: http://localhost:8000 (sign up at `/signup/`)
 - Emails (verification, password reset): http://localhost:8025 (Mailpit)
+- Background jobs: `make compose-ping`, then `make worker-logs` shows the worker log `pong`
 - Tests in the container: `make compose-test`
 
 ### Option B: on your machine
@@ -80,6 +83,9 @@ Emails print to the console by default.
 | `make ci` | Everything CI runs: lint, checks, tests |
 | `make up` / `make down` / `make logs` | Manage the Compose stack |
 | `make superuser` / `make shell` | Create an admin user / Django shell |
+| `make worker` / `make beat` | Run a Celery worker / beat on your machine (needs Redis) |
+| `make ping` / `make compose-ping` | Queue the safe test task, on your machine / in Compose |
+| `make worker-logs` | Follow the Compose worker's and beat's logs |
 
 Commands run on the host load `.env` automatically when it exists. Tests always use `config.settings.test`, whatever `DJANGO_SETTINGS_MODULE` says.
 
@@ -91,7 +97,7 @@ All configuration comes from environment variables (12-factor). [`.env.example`]
 |---|---|---|
 | `config.settings.local` | `manage.py`, Compose | `DEBUG` on, fixed insecure key, console or Mailpit email |
 | `config.settings.test` | pytest, CI | PostgreSQL, fast MD5 hasher, in-memory email and cache |
-| `config.settings.production` | `wsgi`/`asgi`, the production image | Refuses to start without `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS` and `SITE_URL`. HTTPS redirect, HSTS, secure cookies. |
+| `config.settings.production` | `wsgi`/`asgi`, Celery by default, the production image | Refuses to start without `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS`, `SITE_URL` and a `rediss://` `REDIS_URL` with a password. HTTPS redirect, HSTS, secure cookies. |
 
 `.env` is git-ignored. Secrets are never committed: staging and production read them from the platform's secret store.
 
@@ -136,10 +142,34 @@ Sign-up, login, verification and reset are HTML form flows, as [API contracts §
 - **API** ([API contracts §5](docs/api/api-contracts.md#5-invoices)): `GET`/`POST /api/v1/invoices` (cursor pagination; filters `status`, `customer_id`, `overdue`, `due_from`, `due_to`, `currency`, `q`; orderings `-issue_date`, `due_date`, `-due_date`, `balance_due`) and `GET`/`PATCH /api/v1/invoices/{id}` (`If-Match` required). `is_overdue` and `days_overdue` use today's date in the workspace's timezone. Invoices can't be deleted.
 - Not yet built: state actions (void, dispute, pause/resume reminders), the payment ledger services, `reminder_policy_id`, `next_reminder_at`, and HTML pages.
 
+### Background jobs
+
+[System design §8](docs/architecture/system-design.md#8-background-work) is the design; this is what exists so far. The only task is `core.ping`, which logs `pong` and touches neither the database nor email. **Nothing can send a reminder yet:** no reminder task exists, beat doesn't schedule one, and `test_nothing_can_send_a_reminder_yet` fails if that changes before the delivery rules are built. Compose sends all mail to Mailpit, and its settings override `.env`, so nothing there can reach a real address.
+
+**Run it with Compose:** `make up`, then `make compose-ping` and `make worker-logs`. Beat also queues `core.ping` every minute, so `pong` keeps appearing.
+
+**Run it on your machine**, in separate terminals (`make env` first, which sets the local settings; without it Celery falls back to production settings and refuses to start):
+
+```bash
+docker compose up -d redis      # or: brew install redis && brew services start redis
+make worker
+make beat                       # exactly one, ever
+make ping                       # the worker logs: INFO apps.core.tasks pong task=core.ping task_id=…
+```
+
+Handy checks: `uv run celery --workdir backend -A config inspect active_queues` lists what a worker consumes, and `… call core.ping --queue email` sends the test task through a specific queue.
+
+- **Queues:** `outbox`, `email`, `default`, `imports`, `maintenance`, routed by task name in `CELERY_TASK_ROUTES`. Queues must be declared: a mistyped one is an error rather than a queue nobody reads. One worker consumes all five.
+- **Retries:** the base task (`config.celery.Task`) retries connection errors, timeouts and database `OperationalError`s up to 5 times, with jittered exponential backoff capped at 10 minutes. Anything else is a bug and fails once.
+- **Time limits:** 240 s soft and 300 s hard, or 540 s and 600 s for imports. All stay under Redis's 1-hour visibility timeout, past which a task would be delivered again.
+- **Delivery:** at least once (`acks_late`), so every task must be idempotent. Messages are JSON only, there's no result backend, and tasks should take IDs, not objects. Don't use long `countdown` or `eta`: anything scheduled for later is a database row.
+- **Logging:** workers and beat use `settings.LOGGING`, like the web process. Lines logged during a task end with `task=<name> task_id=<id>`, never its arguments. `DJANGO_LOG_LEVEL` sets the level. Celery logs each task's return value, so tasks must not return personal data.
+- **Production:** run the same image with `celery -A config worker --concurrency 4` and `celery -A config beat`. The platform must guarantee a single `beat`.
+
 ### Health
 
 - `GET /healthz`: liveness. Doesn't touch the database.
-- `GET /readyz`: readiness. Runs `SELECT 1` and returns 503 if PostgreSQL is unreachable.
+- `GET /readyz`: readiness. Runs `SELECT 1` and returns 503 if PostgreSQL is unreachable. It doesn't check Redis yet.
 
 ## CI
 
@@ -154,6 +184,6 @@ Sign-up, login, verification and reset are HTML form flows, as [API contracts §
    - `pytest`
 3. **Secret scan:** gitleaks over the full git history.
 
-The workflow stores no secrets. The CI database uses `trust` auth inside the job, and the deploy check generates a throwaway key for each run.
+The workflow stores no secrets. The CI database uses `trust` auth inside the job, and the deploy check generates a throwaway key for each run. Tests need no Redis: they use an in-process broker and run tasks inline.
 
 Pre-commit (`make install` sets it up) runs the same Ruff version, standard hygiene hooks, gitleaks, and the missing-migrations check.

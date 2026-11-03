@@ -5,8 +5,11 @@ what differs. All configuration comes from environment variables; secrets are
 never written here (system design §12.2, threat model T10).
 """
 
+import tempfile
 from datetime import timedelta
 from pathlib import Path
+
+from kombu import Queue
 
 from config.env import env_bool, env_int, env_list, env_str
 
@@ -165,6 +168,51 @@ EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", False)
 EMAIL_TIMEOUT = 10
 DEFAULT_FROM_EMAIL = env_str("DEFAULT_FROM_EMAIL", "InvoicePilot <no-reply@localhost>")
 
+# --- Background work (system design §8) -----------------------------------
+
+CELERY_BROKER_URL = env_str("REDIS_URL", "redis://localhost:6379/0")
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+# Above every time limit, or a running task would be redelivered and run twice.
+CELERY_BROKER_TRANSPORT_OPTIONS = {"visibility_timeout": 3600}
+
+CELERY_TASK_SERIALIZER = CELERY_RESULT_SERIALIZER = "json"
+CELERY_ACCEPT_CONTENT = ["json"]  # never pickle (threat model T11)
+CELERY_TASK_ACKS_LATE = True  # redeliver if a worker dies mid-task, so every task must be idempotent
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+# A task can't ack once the connection is gone, so it will be redelivered: stop it rather than run it twice at once.
+CELERY_WORKER_CANCEL_LONG_RUNNING_TASKS_ON_CONNECTION_LOSS = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_TASK_IGNORE_RESULT = True  # no result backend: outcomes live in PostgreSQL
+CELERY_TASK_TIME_LIMIT = 300
+CELERY_TASK_SOFT_TIME_LIMIT = 240
+CELERY_TASK_ANNOTATIONS = {
+    name: {"time_limit": 600, "soft_time_limit": 540} for name in ("imports.validate_batch", "imports.commit_batch")
+}
+
+CELERY_TASK_DEFAULT_QUEUE = "default"
+CELERY_TASK_QUEUES = [Queue(name) for name in ("outbox", "email", "default", "imports", "maintenance")]
+CELERY_TASK_CREATE_MISSING_QUEUES = False  # a mistyped queue fails, instead of waiting for a worker that never comes
+# Anything not listed goes to the default queue (webhook processing, planning).
+CELERY_TASK_ROUTES = {
+    "outbox.*": {"queue": "outbox"},
+    "accounts.send_*": {"queue": "email"},
+    "reminders.send_delivery": {"queue": "email"},
+    "imports.*": {"queue": "imports"},
+    "core.ping": {"queue": "maintenance"},
+    "retention.*": {"queue": "maintenance"},
+    "*.reconcile_*": {"queue": "maintenance"},
+}
+
+CELERY_TIMEZONE = "UTC"
+# Only tasks that exist: the rest of system design §8.3 arrives with each task.
+# Sending reminders is deliberately not scheduled here.
+CELERY_BEAT_SCHEDULE = {
+    "ping": {"task": "core.ping", "schedule": 60.0, "options": {"expires": 60}},
+}
+# Beat only remembers last-run times, which it can afford to lose, so this
+# stays out of the working directory, which isn't writable in the image.
+CELERY_BEAT_SCHEDULE_FILENAME = str(Path(tempfile.gettempdir()) / "invoicepilot-celerybeat-schedule")
+
 # --- API ------------------------------------------------------------------
 
 REST_FRAMEWORK = {
@@ -197,7 +245,8 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "formatters": {"plain": {"format": "%(asctime)s %(levelname)s %(name)s %(message)s"}},
-    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "plain"}},
+    "filters": {"task_context": {"()": "config.logging.TaskContextFilter"}},
+    "formatters": {"plain": {"format": "%(asctime)s %(levelname)s %(name)s %(message)s%(task_context)s"}},
+    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "plain", "filters": ["task_context"]}},
     "root": {"handlers": ["console"], "level": env_str("DJANGO_LOG_LEVEL", "INFO")},
 }

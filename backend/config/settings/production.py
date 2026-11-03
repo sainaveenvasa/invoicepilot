@@ -1,6 +1,11 @@
 """Staging and production. Every secret and host comes from the environment,
 and start-up fails if one is missing (threat model T10)."""
 
+import ssl
+from urllib.parse import urlsplit
+
+from django.core.exceptions import ImproperlyConfigured
+
 from config.env import env_bool, env_int, env_list, env_str
 
 from .base import *  # noqa: F403
@@ -12,6 +17,13 @@ SECRET_KEY = env_str("DJANGO_SECRET_KEY")
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
 CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
 SITE_URL = env_str("SITE_URL").rstrip("/")
+
+# Anyone who can write to the broker can queue tasks (threat model T11).
+CELERY_BROKER_URL = env_str("REDIS_URL")
+_redis_url = urlsplit(CELERY_BROKER_URL)
+if _redis_url.scheme != "rediss" or not _redis_url.password:
+    raise ImproperlyConfigured("REDIS_URL must use rediss:// with a password.")
+CELERY_BROKER_USE_SSL = {"ssl_cert_reqs": ssl.CERT_REQUIRED}
 
 SECURE_SSL_REDIRECT = env_bool("DJANGO_SECURE_SSL_REDIRECT", True)
 # Load balancer health checks arrive over plain HTTP.

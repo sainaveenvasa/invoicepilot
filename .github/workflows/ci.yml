@@ -86,6 +86,7 @@ jobs:
           DJANGO_ALLOWED_HOSTS: app.invoicepilot.example
           DJANGO_CSRF_TRUSTED_ORIGINS: https://app.invoicepilot.example
           SITE_URL: https://app.invoicepilot.example
+          REDIS_URL: rediss://:placeholder@redis.invoicepilot.example
 
       - name: Tests
         run: uv run pytest
