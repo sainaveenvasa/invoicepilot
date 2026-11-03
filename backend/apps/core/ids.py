@@ -3,6 +3,14 @@ import time
 import uuid
 
 
+def parse_uuid(value) -> uuid.UUID | None:
+    """``value`` as a UUID, or None if it isn't one (selectors treat that as not found)."""
+    try:
+        return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
 def uuid7() -> uuid.UUID:
     """Time-ordered UUID (RFC 9562, version 7).
 

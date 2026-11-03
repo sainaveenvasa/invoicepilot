@@ -68,7 +68,7 @@ def test_payment_cannot_target_another_workspaces_invoice(org, other_org, make_i
     foreign_invoice = make_invoice(other_org)
     with pytest.raises(IntegrityError, match="invoices_paymentrecord_invoice_tenant_fk"), transaction.atomic():
         PaymentRecord.objects.create(
-            organization=org, invoice=foreign_invoice, amount=10, received_on=timezone.localdate()
+            organization=org, invoice=foreign_invoice, amount_minor=10, received_on=timezone.localdate()
         )
 
 

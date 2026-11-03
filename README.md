@@ -4,7 +4,7 @@ Automated invoice tracking and payment follow-up for freelancers and consultants
 
 **Stack:** Python 3.13 · Django 5.2 LTS · Django REST Framework · PostgreSQL 17 · pytest · Ruff · Docker / Docker Compose · uv
 
-**Status:** foundation phase. Accounts (sign-up, login, email verification, password reset), workspaces (organizations, owner membership, tenant resolution) and customer management are implemented. The schema for invoices, reminders, billing, imports, audit and webhooks exists from the data-model phase ([database design](docs/design/phase-2.1-database-design.md)), but none of those features have views, services or APIs yet.
+**Status:** foundation phase. Accounts (sign-up, login, email verification, password reset), workspaces (organizations, owner membership, tenant resolution), customer management and invoice management (API) are implemented. The schema for payments, reminders, billing, imports, audit and webhooks exists from the data-model phase ([database design](docs/design/phase-2.1-database-design.md)), but none of those features have views, services or APIs yet.
 
 ## Design documents
 
@@ -29,7 +29,8 @@ backend/
     accounts/        custom User (UUID PK, normalized unique email), auth flows
     organizations/   Organization, Membership, permissions, selectors, services, TenantMiddleware, API
     customers/       Customer, selectors, services, forms, HTMX views, API
-    invoices/ reminders/ billing/ imports/ audit/ webhooks/ retention/   schema only, for now
+    invoices/        Invoice, selectors, services, API (payments: schema only)
+    reminders/ billing/ imports/ audit/ webhooks/ retention/   schema only, for now
   static/vendor/     HTMX, vendored at a pinned version (checksum-tested)
   templates/         base.html
   tests/             pytest suite (PostgreSQL)
@@ -125,6 +126,15 @@ Sign-up, login, verification and reset are HTML form flows, as [API contracts §
 - **HTML** (`/app/customers/`): list with search and status filter (HTMX refreshes only the results, and it works as a plain form without JavaScript), page-number pagination, add, edit (hidden `version`), deactivate/reactivate (HTMX swaps the row), and delete with confirmation.
 - **API** ([API contracts §4](docs/api/api-contracts.md#4-customers)): `GET`/`POST /api/v1/customers` (cursor pagination, `q`, `is_active`, `ordering`), `GET`/`PATCH`/`DELETE /api/v1/customers/{id}`, `POST …/deactivate`, `POST …/reactivate`. `PATCH` requires `If-Match: "<version>"` (`428` without it, `412 version_conflict` with `current` when it's stale). Responses carry an `ETag`.
 - **HTMX 2.0.11** is vendored in `backend/static/vendor/` and configured with a `<meta>` tag (no inline script): same-origin requests only, no eval, no history cache. Every HTMX request sends the CSRF token through `hx-headers`.
+
+### Invoices
+
+- **Money is stored as integers in the currency's minor unit** (`total_amount_minor`, `balance_due_minor`): 1,250.50 USD is `125050`, 120,000 JPY is `120000`. `core.money` converts at the boundary and never rounds: `10.005 USD` or `100.5 JPY` is rejected. The API sends and accepts decimal strings (`"1250.50"`), never JSON numbers. See [database design §7](docs/design/phase-2.1-database-design.md#7-money-handling) (decision D8).
+- **Model and constraints:** UUIDv7 ID, workspace, customer (with the composite tenant FK, so an invoice can't point at another workspace's customer even via raw SQL), number (unique per workspace ignoring case), currency, issue and due dates, status, reminder pause flag and `version`. Database `CHECK`s keep the balance between 0 and the total, tie the status to the balance (`paid` only at zero, `paid_at` only when paid, `voided_at` only when void), require `due_date >= issue_date`, cap the total, and validate `source` and the description length.
+- **Services** (`invoices.services`) check `invoices.manage` and write access themselves. Creating an invoice requires an active customer in the same workspace (otherwise 404) and checks the plan's monthly invoice limit, counted by the workspace's calendar month.
+- **Edits** compare `version` and lock the invoice row. The customer and currency are immutable, a void invoice can't be edited, and a new total must cover what's already been paid (`409 invalid_state`). Balance and status are then re-derived from the payment records, never taken from the request.
+- **API** ([API contracts §5](docs/api/api-contracts.md#5-invoices)): `GET`/`POST /api/v1/invoices` (cursor pagination; filters `status`, `customer_id`, `overdue`, `due_from`, `due_to`, `currency`, `q`; orderings `-issue_date`, `due_date`, `-due_date`, `balance_due`) and `GET`/`PATCH /api/v1/invoices/{id}` (`If-Match` required). `is_overdue` and `days_overdue` use today's date in the workspace's timezone. Invoices can't be deleted.
+- Not yet built: state actions (void, dispute, pause/resume reminders), the payment ledger services, `reminder_policy_id`, `next_reminder_at`, and HTML pages.
 
 ### Health
 

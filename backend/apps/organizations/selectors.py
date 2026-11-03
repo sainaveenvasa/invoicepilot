@@ -1,16 +1,9 @@
 """Workspace and membership reads. Access is always resolved from the user's
 own memberships, so an ID from another workspace simply isn't found."""
 
-import uuid
+from apps.core.ids import parse_uuid
 
 from .models import Membership
-
-
-def _as_uuid(value) -> uuid.UUID | None:
-    try:
-        return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
-    except (TypeError, ValueError, AttributeError):
-        return None
 
 
 def memberships_for_user(user):
@@ -23,7 +16,7 @@ def memberships_for_user(user):
 def get_membership(*, user, organization_id) -> Membership | None:
     """The user's membership of one workspace, or None if they have none
     (including when the ID is malformed or belongs to someone else)."""
-    organization_id = _as_uuid(organization_id)
+    organization_id = parse_uuid(organization_id)
     if organization_id is None:
         return None
     return memberships_for_user(user).filter(organization_id=organization_id).first()

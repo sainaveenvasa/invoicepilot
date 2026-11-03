@@ -8,7 +8,7 @@ from apps.core import errors
 
 from .models import Plan, Subscription
 
-LIMIT_FIELDS = {"customers": "max_customers"}
+LIMIT_FIELDS = {"customers": "max_customers", "invoices_per_month": "max_invoices_per_month"}
 
 
 def current_plan(organization) -> Plan | None:

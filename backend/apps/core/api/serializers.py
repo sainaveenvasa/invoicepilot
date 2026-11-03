@@ -5,13 +5,20 @@ from rest_framework import serializers
 
 class StrictFieldsMixin:
     """Reject unknown and read-only fields instead of silently ignoring them
-    (API contracts §1.1), so a typo or a mass-assignment attempt is visible."""
+    (API contracts §1.1), so a typo or a mass-assignment attempt is visible.
+
+    ``read_only_names`` lists fields of the resource that a write serializer
+    doesn't declare, so sending one says "read-only" rather than "unknown".
+    """
+
+    read_only_names: tuple[str, ...] = ()
 
     def to_internal_value(self, data):
         if isinstance(data, Mapping):
             writable = {name for name, field in self.fields.items() if not field.read_only}
+            known = set(self.fields) | set(self.read_only_names)
             errors = {
-                key: ["This field is read-only." if key in self.fields else "Unknown field."]
+                key: ["This field is read-only." if key in known else "Unknown field."]
                 for key in sorted(set(data) - writable)
             }
             if errors:

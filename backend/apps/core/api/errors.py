@@ -21,6 +21,7 @@ TITLES = {
     "not_found": "Not found.",
     "method_not_allowed": "Method not allowed.",
     "duplicate": "Already exists.",
+    "invalid_state": "Not allowed in the current state.",
     "in_use": "In use.",
     "version_conflict": "Version conflict.",
     "unsupported_media_type": "Unsupported media type.",

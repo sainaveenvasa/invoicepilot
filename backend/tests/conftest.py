@@ -1,5 +1,4 @@
 from datetime import date
-from decimal import Decimal
 
 import pytest
 from django.core.cache import cache
@@ -61,11 +60,12 @@ def make_customer(db):
 
 @pytest.fixture
 def make_invoice(make_customer):
-    def make(organization, customer=None, invoice_number="INV-001", total="1000.00", **overrides):
+    def make(organization, customer=None, invoice_number="INV-001", total=100_000, **overrides):
+        """Straight to the database; ``total`` is in minor units (100_000 is 1,000.00 USD)."""
         fields = {
             "currency": "USD",
-            "total_amount": Decimal(total),
-            "balance_due": Decimal(total),
+            "total_amount_minor": total,
+            "balance_due_minor": total,
             "issue_date": date(2026, 10, 1),
             "due_date": date(2026, 10, 15),
         }

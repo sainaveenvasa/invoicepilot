@@ -64,6 +64,14 @@ class Duplicate(DomainError):
         super().__init__(detail, **extra)
 
 
+class InvalidState(DomainError):
+    """The record's state doesn't allow this; ``detail`` explains why."""
+
+    status = 409
+    code = "invalid_state"
+    default_detail = "This isn't allowed in the record's current state."
+
+
 class InUse(DomainError):
     status = 409
     code = "in_use"

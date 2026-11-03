@@ -1,20 +1,29 @@
 from datetime import date
-from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxLengthValidator, MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import F, Q, Sum
-from django.db.models.functions import Lower
+from django.db.models.functions import Length, Lower
+from django.db.models.lookups import LessThanOrEqual
 from django.utils import timezone
 
 from apps.core.models import TenantModel, tenant_key
+from apps.core.money import MAX_MINOR
 from apps.core.validators import CURRENCY_CODE_REGEX, validate_currency
 
-MONEY = {"max_digits": 14, "decimal_places": 2}
+DESCRIPTION_MAX_LENGTH = 5000
 
 
 class Invoice(TenantModel):
+    """An amount a customer owes (FR-005). Money is in integer minor units of
+    ``currency`` (core.money): 125050 is 1,250.50 USD, 120000 is 120,000 JPY.
+
+    Write only through invoices.services, which checks permissions, write
+    access, the plan limit and ``version``.
+    """
+
     class Status(models.TextChoices):
         OPEN = "open", "Open"
         PARTIALLY_PAID = "partially_paid", "Partially paid"
@@ -25,6 +34,7 @@ class Invoice(TenantModel):
     class Source(models.TextChoices):
         MANUAL = "manual", "Manual entry"
         CSV_IMPORT = "csv_import", "CSV import"
+        API = "api", "API"
 
     # Invoices that still carry an unpaid balance.
     UNSETTLED_STATUSES = [Status.OPEN, Status.PARTIALLY_PAID, Status.DISPUTED]
@@ -32,15 +42,15 @@ class Invoice(TenantModel):
     customer = models.ForeignKey("customers.Customer", on_delete=models.RESTRICT, related_name="invoices")
     invoice_number = models.CharField(max_length=64)
     currency = models.CharField(max_length=3, validators=[validate_currency])
-    total_amount = models.DecimalField(**MONEY)
-    # Denormalized from total_amount and PaymentRecord rows (BR-003) so that the
+    total_amount_minor = models.BigIntegerField(validators=[MinValueValidator(1), MaxValueValidator(MAX_MINOR)])
+    # Denormalized from the total and PaymentRecord rows (BR-003) so that the
     # dashboard, aging buckets and reminder scans never aggregate payments.
     # Maintained only by recalculate_balance() under a row lock.
-    balance_due = models.DecimalField(**MONEY)
+    balance_due_minor = models.BigIntegerField()
     issue_date = models.DateField()
     due_date = models.DateField()
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
-    description = models.TextField(blank=True)
+    description = models.TextField(blank=True, validators=[MaxLengthValidator(DESCRIPTION_MAX_LENGTH)])
     source = models.CharField(max_length=20, choices=Source.choices, default=Source.MANUAL)
 
     reminders_paused = models.BooleanField(default=False)
@@ -54,14 +64,18 @@ class Invoice(TenantModel):
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
     )
+    # Optimistic lock (database design §11.6): user edits increment it.
+    # Balance recalculation doesn't, as it is serialized by the row lock.
+    version = models.PositiveIntegerField(default=1)
 
     class Meta:
         constraints = [
             tenant_key("invoices_invoice_tenant_key"),
             models.UniqueConstraint(F("organization"), Lower("invoice_number"), name="invoices_invoice_number_uniq"),
-            models.CheckConstraint(condition=Q(total_amount__gt=0), name="invoices_invoice_total_positive"),
+            models.CheckConstraint(condition=Q(total_amount_minor__gt=0), name="invoices_invoice_total_positive"),
+            models.CheckConstraint(condition=Q(total_amount_minor__lte=MAX_MINOR), name="invoices_invoice_total_max"),
             models.CheckConstraint(
-                condition=Q(balance_due__gte=0, balance_due__lte=F("total_amount")),
+                condition=Q(balance_due_minor__gte=0, balance_due_minor__lte=F("total_amount_minor")),
                 name="invoices_invoice_balance_in_range",
             ),
             models.CheckConstraint(condition=Q(due_date__gte=F("issue_date")), name="invoices_invoice_due_after_issue"),
@@ -71,13 +85,28 @@ class Invoice(TenantModel):
             models.CheckConstraint(condition=~Q(invoice_number=""), name="invoices_invoice_number_present"),
             # Status must agree with the balance (FR-006: a zero balance is paid).
             models.CheckConstraint(
-                condition=Q(status="open", balance_due=F("total_amount"))
-                | Q(status="partially_paid", balance_due__gt=0, balance_due__lt=F("total_amount"))
-                | Q(status="paid", balance_due=0, paid_at__isnull=False)
-                | Q(status="disputed", balance_due__gt=0, disputed_at__isnull=False)
+                condition=Q(status="open", balance_due_minor=F("total_amount_minor"))
+                | Q(status="partially_paid", balance_due_minor__gt=0, balance_due_minor__lt=F("total_amount_minor"))
+                | Q(status="paid", balance_due_minor=0, paid_at__isnull=False)
+                | Q(status="disputed", balance_due_minor__gt=0, disputed_at__isnull=False)
                 | Q(status="void", voided_at__isnull=False),
                 name="invoices_invoice_status_consistent",
             ),
+            # With the CHECK above, paid_at is set exactly when paid, voided_at exactly when void.
+            models.CheckConstraint(
+                condition=Q(status="paid") | Q(paid_at__isnull=True), name="invoices_invoice_paid_at"
+            ),
+            models.CheckConstraint(
+                condition=Q(status="void") | Q(voided_at__isnull=True), name="invoices_invoice_voided_at"
+            ),
+            models.CheckConstraint(
+                condition=Q(source__in=["manual", "csv_import", "api"]), name="invoices_invoice_source_valid"
+            ),
+            models.CheckConstraint(
+                condition=LessThanOrEqual(Length("description"), DESCRIPTION_MAX_LENGTH),
+                name="invoices_invoice_description_length",
+            ),
+            models.CheckConstraint(condition=Q(version__gte=1), name="invoices_invoice_version_positive"),
             models.CheckConstraint(
                 condition=Q(reminders_paused=False) | Q(paused_at__isnull=False),
                 name="invoices_invoice_pause_consistent",
@@ -105,35 +134,52 @@ class Invoice(TenantModel):
     def __str__(self):
         return self.invoice_number
 
+    def clean(self):
+        super().clean()
+        if self.issue_date and self.due_date and self.due_date < self.issue_date:
+            raise ValidationError({"due_date": "The due date can't be before the issue date."})
+
+    @property
+    def amount_paid_minor(self) -> int:
+        return self.total_amount_minor - self.balance_due_minor
+
     def is_overdue(self, as_of: date) -> bool:
         """BR-004. `as_of` is today's date in the workspace timezone."""
-        return self.status != self.Status.VOID and self.balance_due > 0 and self.due_date < as_of
+        return self.status != self.Status.VOID and self.balance_due_minor > 0 and self.due_date < as_of
+
+    def days_overdue(self, as_of: date) -> int:
+        return (as_of - self.due_date).days if self.is_overdue(as_of) else 0
 
     def derive_status(self) -> str:
         if self.voided_at:
             return self.Status.VOID
-        if self.balance_due == 0:
+        if self.balance_due_minor == 0:
             return self.Status.PAID
         if self.disputed_at:
             return self.Status.DISPUTED
-        if self.balance_due == self.total_amount:
+        if self.balance_due_minor == self.total_amount_minor:
             return self.Status.OPEN
         return self.Status.PARTIALLY_PAID
 
+    def net_paid_minor(self) -> int:
+        """Payments and credits minus refunds, from non-voided payment records:
+        the least the total can be (an edit below it would make the balance negative)."""
+        sums = self.payment_records.filter(voided_at__isnull=True).aggregate(
+            reductions=Sum("amount_minor", filter=Q(kind__in=["payment", "credit"]), default=0),
+            refunds=Sum("amount_minor", filter=Q(kind="refund"), default=0),
+        )
+        return sums["reductions"] - sums["refunds"]
+
     def recalculate_balance(self) -> None:
-        """Re-derive balance_due and status from non-voided payment records (BR-003).
+        """Re-derive balance_due_minor and status from the payment records (BR-003).
 
         Callers must hold SELECT ... FOR UPDATE on this invoice so concurrent
         payments cannot both read the old balance.
         """
-        sums = self.payment_records.filter(voided_at__isnull=True).aggregate(
-            reductions=Sum("amount", filter=Q(kind__in=["payment", "credit"]), default=Decimal("0")),
-            refunds=Sum("amount", filter=Q(kind="refund"), default=Decimal("0")),
-        )
-        balance = self.total_amount - sums["reductions"] + sums["refunds"]
-        if not Decimal("0") <= balance <= self.total_amount:
+        balance = self.total_amount_minor - self.net_paid_minor()
+        if not 0 <= balance <= self.total_amount_minor:
             raise ValidationError("Recorded payments would put the balance outside 0 and the invoice total.")
-        self.balance_due = balance
+        self.balance_due_minor = balance
         self.status = self.derive_status()
         if self.status == self.Status.PAID:
             self.paid_at = self.paid_at or timezone.now()
@@ -160,8 +206,9 @@ class PaymentRecord(TenantModel):
 
     invoice = models.ForeignKey(Invoice, on_delete=models.RESTRICT, related_name="payment_records")
     kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.PAYMENT)
-    # Always positive; the effect on the balance comes from `kind`.
-    amount = models.DecimalField(**MONEY)
+    # Minor units of the invoice's currency. Always positive; the effect on
+    # the balance comes from `kind`.
+    amount_minor = models.BigIntegerField()
     received_on = models.DateField()
     method = models.CharField(max_length=20, choices=Method.choices, blank=True)
     reference = models.CharField(max_length=128, blank=True)
@@ -178,7 +225,7 @@ class PaymentRecord(TenantModel):
 
     class Meta:
         constraints = [
-            models.CheckConstraint(condition=Q(amount__gt=0), name="invoices_payment_amount_positive"),
+            models.CheckConstraint(condition=Q(amount_minor__gt=0), name="invoices_payment_amount_positive"),
             models.CheckConstraint(
                 condition=Q(kind__in=["payment", "credit", "refund"]), name="invoices_payment_kind_valid"
             ),

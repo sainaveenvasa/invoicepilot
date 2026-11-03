@@ -5,8 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core import errors
-from apps.core.api.concurrency import etag, if_match_version
-from apps.core.api.errors import PROBLEM_CONTENT_TYPE, problem
+from apps.core.api.concurrency import etag, if_match_version, version_conflict_response
 from apps.core.api.pagination import CursorPagination
 from apps.customers import selectors, services
 from apps.organizations import permissions
@@ -64,11 +63,7 @@ class CustomerDetailView(APIView):
                 ctx=request.ctx, customer_id=customer.pk, version=version, **serializer.validated_data
             )
         except errors.VersionConflict as conflict:
-            current = conflict.current
-            body = problem(conflict.status, conflict.code, conflict.detail, current=CustomerSerializer(current).data)
-            return Response(
-                body, status=conflict.status, content_type=PROBLEM_CONTENT_TYPE, headers={"ETag": etag(current.version)}
-            )
+            return version_conflict_response(conflict, CustomerSerializer(conflict.current).data)
         return customer_response(customer)
 
     def delete(self, request, customer_id):
